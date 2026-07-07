@@ -550,6 +550,11 @@ window.cycleSpeed = cycleSpeed;
 // ============================================================
 // ADMIN PANEL
 // ============================================================
+let adminPlaylistsRaw = [];      // danh sách rút gọn từ /api/playlists
+let adminDetailCache = {};       // playlistId -> full detail (có parts)
+let adminExpandedId = null;      // playlist đang mở rộng (xem/sửa tập)
+let adminEditingPlaylistId = null; // playlist đang ở chế độ sửa thông tin
+
 function openAdminPanel() {
   document.getElementById("admin-panel").style.display = "flex";
   loadAdminPlaylists();
@@ -571,31 +576,113 @@ async function loadAdminPlaylists() {
   listEl.innerHTML = `<p class="loading-text">Đang tải...</p>`;
   try {
     const res = await fetch(`${API_BASE_URL}/api/playlists`);
-    const playlists = await res.json();
-    renderAdminPlaylists(playlists);
+    adminPlaylistsRaw = await res.json();
+    renderAdminPlaylists();
   } catch (err) {
     listEl.innerHTML = `<p class="error-text">Không tải được danh sách truyện.</p>`;
     console.error(err);
   }
 }
 
-function renderAdminPlaylists(playlists) {
+async function fetchAdminDetail(playlistId, forceRefresh = false) {
+  if (!forceRefresh && adminDetailCache[playlistId]) return adminDetailCache[playlistId];
+  const res = await fetch(`${API_BASE_URL}/api/playlists/${playlistId}`);
+  const data = await res.json();
+  adminDetailCache[playlistId] = data;
+  return data;
+}
+
+function renderAdminPlaylists() {
   const listEl = document.getElementById("admin-playlist-list");
-  if (playlists.length === 0) {
+  if (adminPlaylistsRaw.length === 0) {
     listEl.innerHTML = `<p class="loading-text">Chưa có truyện nào.</p>`;
     return;
   }
-  listEl.innerHTML = playlists.map(p => `
+  listEl.innerHTML = adminPlaylistsRaw.map(p => renderAdminPlaylistCard(p)).join("");
+
+  // Nếu đang mở rộng 1 playlist, load phần chi tiết (parts) cho nó
+  if (adminExpandedId) {
+    renderAdminPartsSection(adminExpandedId);
+  }
+}
+
+function renderAdminPlaylistCard(p) {
+  const isEditing = adminEditingPlaylistId === p.id;
+  const isExpanded = adminExpandedId === p.id;
+
+  if (isEditing) {
+    return `
+      <div class="admin-playlist-card">
+        <form class="admin-form" onsubmit="handleAdminEditPlaylist(event, '${p.id}')">
+          <input type="text" id="admin-edit-title-${p.id}" value="${p.title.replace(/"/g, '&quot;')}" required>
+          <input type="text" id="admin-edit-cover-${p.id}" value="${p.cover.replace(/"/g, '&quot;')}" required>
+          <input type="text" id="admin-edit-category-${p.id}" value="${p.category.replace(/"/g, '&quot;')}" required>
+          <textarea id="admin-edit-description-${p.id}" rows="2">${p.description || ""}</textarea>
+          <div class="admin-playlist-card-actions">
+            <button type="submit" class="admin-mini-btn">Lưu</button>
+            <button type="button" class="admin-mini-btn" onclick="cancelAdminEditPlaylist()">Hủy</button>
+          </div>
+          <div class="auth-error" id="admin-edit-playlist-error-${p.id}"></div>
+        </form>
+      </div>
+    `;
+  }
+
+  return `
     <div class="admin-playlist-card">
       <div class="admin-playlist-card-header">
         <img src="${p.cover}" alt="${p.title}">
         <div class="admin-playlist-card-title">${p.title}</div>
         <div class="admin-playlist-card-actions">
+          <button class="admin-mini-btn" onclick="toggleAdminParts('${p.id}')">${isExpanded ? "Đóng" : "Quản lý tập"}</button>
+          <button class="admin-mini-btn" onclick="startAdminEditPlaylist('${p.id}')">Sửa</button>
           <button class="admin-mini-btn danger" onclick="handleAdminDeletePlaylist('${p.id}')">Xóa</button>
         </div>
       </div>
+      ${isExpanded ? `<div class="admin-parts-list" id="admin-parts-section-${p.id}"><p class="loading-text">Đang tải tập...</p></div>` : ""}
     </div>
-  `).join("");
+  `;
+}
+
+function startAdminEditPlaylist(playlistId) {
+  adminEditingPlaylistId = playlistId;
+  renderAdminPlaylists();
+}
+function cancelAdminEditPlaylist() {
+  adminEditingPlaylistId = null;
+  renderAdminPlaylists();
+}
+
+async function handleAdminEditPlaylist(event, playlistId) {
+  event.preventDefault();
+  const errorEl = document.getElementById(`admin-edit-playlist-error-${playlistId}`);
+  errorEl.textContent = "";
+
+  const body = {
+    title: document.getElementById(`admin-edit-title-${playlistId}`).value.trim(),
+    cover: document.getElementById(`admin-edit-cover-${playlistId}`).value.trim(),
+    category: document.getElementById(`admin-edit-category-${playlistId}`).value.trim(),
+    description: document.getElementById(`admin-edit-description-${playlistId}`).value.trim()
+  };
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/admin/playlists/${playlistId}`, {
+      method: "PUT",
+      headers: adminAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = data.error || "Cập nhật thất bại";
+      return;
+    }
+    adminEditingPlaylistId = null;
+    playlistCache.delete(playlistId);
+    delete adminDetailCache[playlistId];
+    await loadAdminPlaylists();
+  } catch (err) {
+    errorEl.textContent = "Lỗi kết nối máy chủ";
+  }
 }
 
 async function handleAdminAddPlaylist(event) {
@@ -623,8 +710,8 @@ async function handleAdminAddPlaylist(event) {
       return;
     }
     document.getElementById("admin-add-playlist-form").reset();
-    loadAdminPlaylists();
     playlistCache.clear();
+    await loadAdminPlaylists();
   } catch (err) {
     errorEl.textContent = "Lỗi kết nối máy chủ";
   }
@@ -642,8 +729,203 @@ async function handleAdminDeletePlaylist(playlistId) {
       alert(data.error || "Xóa thất bại");
       return;
     }
-    loadAdminPlaylists();
-    playlistCache.clear();
+    if (adminExpandedId === playlistId) adminExpandedId = null;
+    playlistCache.delete(playlistId);
+    delete adminDetailCache[playlistId];
+    await loadAdminPlaylists();
+  } catch (err) {
+    alert("Lỗi kết nối máy chủ");
+  }
+}
+
+// ============================================================
+// ADMIN — QUẢN LÝ TẬP (PARTS)
+// ============================================================
+async function toggleAdminParts(playlistId) {
+  if (adminExpandedId === playlistId) {
+    adminExpandedId = null;
+    renderAdminPlaylists();
+    return;
+  }
+  adminExpandedId = playlistId;
+  renderAdminPlaylists();
+  await renderAdminPartsSection(playlistId, true);
+}
+
+async function renderAdminPartsSection(playlistId, forceRefresh = false) {
+  const sectionEl = document.getElementById(`admin-parts-section-${playlistId}`);
+  if (!sectionEl) return;
+
+  let detail;
+  try {
+    detail = await fetchAdminDetail(playlistId, forceRefresh);
+  } catch (err) {
+    sectionEl.innerHTML = `<p class="error-text">Không tải được danh sách tập.</p>`;
+    return;
+  }
+
+  const partsHtml = detail.parts.map(part => `
+    <div class="admin-part-row">
+      <span>#${part.partNumber}${part.locked ? " 🔒" : ""}</span>
+      <span class="admin-part-title">${part.title}</span>
+      <span>${part.duration}</span>
+      <button class="admin-mini-btn" onclick="startAdminEditPart('${playlistId}', '${part.id}')">Sửa</button>
+      <button class="admin-mini-btn danger" onclick="handleAdminDeletePart('${playlistId}', '${part.id}')">Xóa</button>
+    </div>
+    <div id="admin-edit-part-form-${part.id}"></div>
+  `).join("");
+
+  sectionEl.innerHTML = `
+    ${partsHtml}
+    <div class="admin-part-add-wrap" style="margin-top:10px">
+      <div class="admin-section-title">Thêm tập mới</div>
+      <form class="admin-form" onsubmit="handleAdminAddPart(event, '${playlistId}')">
+        <input type="number" id="admin-new-part-number-${playlistId}" placeholder="Số thứ tự (vd: 1)" required min="1">
+        <input type="text" id="admin-new-part-title-${playlistId}" placeholder="Tiêu đề tập" required>
+        <input type="text" id="admin-new-part-duration-${playlistId}" placeholder="Thời lượng (vd: 12:34)" required>
+        <label style="font-size:12.5px;color:var(--text-muted);display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="admin-new-part-locked-${playlistId}" style="width:auto"> Khóa tập này (cần vượt link)
+        </label>
+        <input type="file" id="admin-new-part-audio-${playlistId}" accept="audio/*" required>
+        <button type="submit" class="auth-submit-btn" id="admin-add-part-submit-${playlistId}">Tải lên & Thêm tập</button>
+        <div class="auth-error" id="admin-add-part-error-${playlistId}"></div>
+      </form>
+    </div>
+  `;
+}
+
+async function handleAdminAddPart(event, playlistId) {
+  event.preventDefault();
+  const errorEl = document.getElementById(`admin-add-part-error-${playlistId}`);
+  const submitBtn = document.getElementById(`admin-add-part-submit-${playlistId}`);
+  errorEl.textContent = "";
+
+  const fileInput = document.getElementById(`admin-new-part-audio-${playlistId}`);
+  if (!fileInput.files[0]) {
+    errorEl.textContent = "Vui lòng chọn file audio";
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("partNumber", document.getElementById(`admin-new-part-number-${playlistId}`).value);
+  formData.append("title", document.getElementById(`admin-new-part-title-${playlistId}`).value.trim());
+  formData.append("duration", document.getElementById(`admin-new-part-duration-${playlistId}`).value.trim());
+  formData.append("locked", document.getElementById(`admin-new-part-locked-${playlistId}`).checked);
+  formData.append("audio", fileInput.files[0]);
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Đang tải lên...";
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/admin/playlists/${playlistId}/parts`, {
+      method: "POST",
+      headers: adminAuthHeaders(), // KHÔNG set Content-Type, để trình duyệt tự set boundary cho multipart
+      body: formData
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = data.error || "Thêm tập thất bại";
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Tải lên & Thêm tập";
+      return;
+    }
+    playlistCache.delete(playlistId);
+    await renderAdminPartsSection(playlistId, true);
+    await loadAdminPlaylists(); // cập nhật lại tổng số tập ở danh sách chính nếu cần
+  } catch (err) {
+    errorEl.textContent = "Lỗi kết nối máy chủ";
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Tải lên & Thêm tập";
+  }
+}
+
+async function startAdminEditPart(playlistId, partId) {
+  const detail = await fetchAdminDetail(playlistId);
+  const part = detail.parts.find(p => p.id === partId);
+  if (!part) return;
+
+  const formSlot = document.getElementById(`admin-edit-part-form-${partId}`);
+  formSlot.innerHTML = `
+    <form class="admin-form" style="margin:8px 0 16px" onsubmit="handleAdminUpdatePart(event, '${playlistId}', '${partId}')">
+      <input type="number" id="admin-edit-part-number-${partId}" value="${part.partNumber}" required min="1">
+      <input type="text" id="admin-edit-part-title-${partId}" value="${part.title.replace(/"/g, '&quot;')}" required>
+      <input type="text" id="admin-edit-part-duration-${partId}" value="${part.duration}" required>
+      <label style="font-size:12.5px;color:var(--text-muted);display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="admin-edit-part-locked-${partId}" style="width:auto" ${part.locked ? "checked" : ""}> Khóa tập này
+      </label>
+      <input type="file" id="admin-edit-part-audio-${partId}" accept="audio/*">
+      <div style="font-size:11.5px;color:var(--text-faint)">Chỉ chọn file nếu muốn thay audio, để trống nếu giữ nguyên</div>
+      <div class="admin-playlist-card-actions">
+        <button type="submit" class="admin-mini-btn" id="admin-edit-part-submit-${partId}">Lưu</button>
+        <button type="button" class="admin-mini-btn" onclick="cancelAdminEditPart('${partId}')">Hủy</button>
+      </div>
+      <div class="auth-error" id="admin-edit-part-error-${partId}"></div>
+    </form>
+  `;
+}
+
+function cancelAdminEditPart(partId) {
+  const formSlot = document.getElementById(`admin-edit-part-form-${partId}`);
+  if (formSlot) formSlot.innerHTML = "";
+}
+
+async function handleAdminUpdatePart(event, playlistId, partId) {
+  event.preventDefault();
+  const errorEl = document.getElementById(`admin-edit-part-error-${partId}`);
+  const submitBtn = document.getElementById(`admin-edit-part-submit-${partId}`);
+  errorEl.textContent = "";
+
+  const formData = new FormData();
+  formData.append("partNumber", document.getElementById(`admin-edit-part-number-${partId}`).value);
+  formData.append("title", document.getElementById(`admin-edit-part-title-${partId}`).value.trim());
+  formData.append("duration", document.getElementById(`admin-edit-part-duration-${partId}`).value.trim());
+  formData.append("locked", document.getElementById(`admin-edit-part-locked-${partId}`).checked);
+
+  const fileInput = document.getElementById(`admin-edit-part-audio-${partId}`);
+  if (fileInput.files[0]) {
+    formData.append("audio", fileInput.files[0]);
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Đang lưu...";
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/admin/playlists/${playlistId}/parts/${partId}`, {
+      method: "PUT",
+      headers: adminAuthHeaders(),
+      body: formData
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = data.error || "Cập nhật tập thất bại";
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Lưu";
+      return;
+    }
+    playlistCache.delete(playlistId);
+    await renderAdminPartsSection(playlistId, true);
+  } catch (err) {
+    errorEl.textContent = "Lỗi kết nối máy chủ";
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Lưu";
+  }
+}
+
+async function handleAdminDeletePart(playlistId, partId) {
+  if (!confirm("Xóa tập này? Không thể hoàn tác.")) return;
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/admin/playlists/${playlistId}/parts/${partId}`, {
+      method: "DELETE",
+      headers: adminAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Xóa tập thất bại");
+      return;
+    }
+    playlistCache.delete(playlistId);
+    await renderAdminPartsSection(playlistId, true);
+    await loadAdminPlaylists();
   } catch (err) {
     alert("Lỗi kết nối máy chủ");
   }
@@ -654,5 +936,14 @@ window.closeAdminPanel = closeAdminPanel;
 window.closeAdminPanelOnOverlay = closeAdminPanelOnOverlay;
 window.handleAdminAddPlaylist = handleAdminAddPlaylist;
 window.handleAdminDeletePlaylist = handleAdminDeletePlaylist;
+window.startAdminEditPlaylist = startAdminEditPlaylist;
+window.cancelAdminEditPlaylist = cancelAdminEditPlaylist;
+window.handleAdminEditPlaylist = handleAdminEditPlaylist;
+window.toggleAdminParts = toggleAdminParts;
+window.handleAdminAddPart = handleAdminAddPart;
+window.startAdminEditPart = startAdminEditPart;
+window.cancelAdminEditPart = cancelAdminEditPart;
+window.handleAdminUpdatePart = handleAdminUpdatePart;
+window.handleAdminDeletePart = handleAdminDeletePart;
 
 init();
