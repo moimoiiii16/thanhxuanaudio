@@ -495,3 +495,34 @@ button { font-family: inherit; }
 }
 .speed-btn:hover:not(:disabled) { background: rgba(45,212,191,0.25); }
 .speed-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-icon {
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font-size: inherit;
+  font-family: inherit;
+}
+
+.search-input::placeholder {
+  color: inherit;
+  opacity: 0.6;
+}
+
+.no-results-text {
+  padding: 16px 4px;
+  opacity: 0.6;
+  font-size: 14px;
+}

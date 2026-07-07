@@ -20,7 +20,17 @@
         </div>
       </div>
 
-      <div class="search-box">🔍 Tìm truyện...</div>
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input
+          type="text"
+          id="search-input"
+          class="search-input"
+          placeholder="Tìm truyện..."
+          oninput="handleSearchInput()"
+          autocomplete="off"
+        >
+      </div>
 
       <div>
         <div class="nav-label" style="margin-bottom:10px">Khám phá truyện audio</div>

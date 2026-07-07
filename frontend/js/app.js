@@ -5,6 +5,7 @@ let allPlaylists = [];
 let currentPlaylist = null;
 let currentPart = null; // part object currently loaded in the player
 let isPlaying = false;
+let searchQuery = ""; // NEW: chuỗi đang tìm kiếm trong ô search
 
 const qs = new URLSearchParams(location.search);
 const tokenFromUrl = qs.get("token");
@@ -55,11 +56,34 @@ async function init() {
 }
 
 // ============================================================
+// SEARCH
+// ============================================================
+function handleSearchInput() {
+  const input = document.getElementById("search-input");
+  searchQuery = input.value.trim().toLowerCase();
+  renderSidebar();
+}
+
+function getFilteredPlaylists() {
+  if (!searchQuery) return allPlaylists;
+  return allPlaylists.filter(p =>
+    p.title.toLowerCase().includes(searchQuery)
+  );
+}
+
+// ============================================================
 // SIDEBAR
 // ============================================================
 function renderSidebar() {
   const list = document.getElementById("story-list");
-  list.innerHTML = allPlaylists.map(p => `
+  const filtered = getFilteredPlaylists();
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<p class="no-results-text">Không tìm thấy truyện nào khớp với "${searchQuery}"</p>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(p => `
     <div class="story-item" data-id="${p.id}" onclick="selectPlaylist('${p.id}')">
       <img src="${p.cover}" alt="${p.title}">
       <div class="meta">
@@ -68,6 +92,11 @@ function renderSidebar() {
       </div>
     </div>
   `).join("");
+
+  // Giữ nguyên trạng thái "đang chọn" nếu playlist đó vẫn còn hiển thị sau khi lọc
+  if (currentPlaylist) {
+    highlightActiveSidebar(currentPlaylist.id);
+  }
 }
 
 function highlightActiveSidebar(playlistId) {
@@ -336,6 +365,7 @@ window.handleEpisodeClick = handleEpisodeClick;
 window.startUnlockFlow = startUnlockFlow;
 window.togglePlay = togglePlay;
 window.skip = skip;
+window.handleSearchInput = handleSearchInput;
 
 // ============================================================
 // SEEK BAR / TỐC ĐỘ / TUA 10 GIÂY
@@ -372,4 +402,3 @@ window.seekRelative = seekRelative;
 window.cycleSpeed = cycleSpeed;
 
 init();
-
