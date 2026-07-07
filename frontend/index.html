@@ -21,6 +21,7 @@
       </div>
 
       <div id="auth-box" class="auth-box"></div>
+      <button id="admin-nav-btn" class="admin-nav-btn" style="display:none" onclick="openAdminPanel()">⚙️ Quản trị</button>
 
       <div class="search-box">
         <span class="search-icon">🔍</span>
@@ -62,6 +63,43 @@
 
   <script src="js/config.js"></script>
   <script src="js/app.js"></script>
+
+  <!-- ADMIN PANEL -->
+  <div id="admin-panel" class="admin-panel-overlay" style="display:none" onclick="closeAdminPanelOnOverlay(event)">
+    <div class="admin-panel">
+      <div class="admin-panel-header">
+        <div class="admin-panel-title">Quản trị truyện</div>
+        <button class="auth-modal-close" onclick="closeAdminPanel()">✕</button>
+      </div>
+
+      <div class="admin-panel-body">
+
+        <!-- Form thêm truyện mới -->
+        <div class="admin-section">
+          <div class="admin-section-title">Thêm truyện mới</div>
+          <form id="admin-add-playlist-form" class="admin-form" onsubmit="handleAdminAddPlaylist(event)">
+            <input type="text" id="admin-new-id" placeholder="ID (vd: truyen-abc, không dấu, không cách)" required>
+            <input type="text" id="admin-new-title" placeholder="Tiêu đề truyện" required>
+            <input type="text" id="admin-new-cover" placeholder="Link ảnh bìa (URL)" required>
+            <input type="text" id="admin-new-category" placeholder="Thể loại" required>
+            <textarea id="admin-new-description" placeholder="Mô tả" rows="2"></textarea>
+            <button type="submit" class="auth-submit-btn">Tạo truyện</button>
+            <div class="auth-error" id="admin-add-playlist-error"></div>
+          </form>
+        </div>
+
+        <!-- Danh sách truyện hiện có -->
+        <div class="admin-section">
+          <div class="admin-section-title">Danh sách truyện</div>
+          <div id="admin-playlist-list" class="admin-playlist-list">
+            <p class="loading-text">Đang tải...</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
 
   <div id="auth-modal" class="auth-modal-overlay" style="display:none" onclick="closeAuthModalOnOverlay(event)">
   <div class="auth-modal">

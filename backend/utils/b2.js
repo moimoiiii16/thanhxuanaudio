@@ -1,13 +1,12 @@
 const axios = require("axios");
+const crypto = require("crypto");
 
 const B2_KEY_ID = process.env.B2_KEY_ID;
 const B2_APPLICATION_KEY = process.env.B2_APPLICATION_KEY;
 const B2_BUCKET_ID = process.env.B2_BUCKET_ID;
 const B2_BUCKET_NAME = process.env.B2_BUCKET_NAME;
 
-// Cache thông tin đăng nhập B2 trong RAM, vì token sống được ~24h,
-// không cần xin lại mỗi lần có request.
-let authCache = null; // { apiUrl, downloadUrl, authorizationToken, expiresAt }
+let authCache = null;
 
 async function authorize() {
   if (authCache && Date.now() < authCache.expiresAt) {
@@ -25,18 +24,12 @@ async function authorize() {
     apiUrl: res.data.apiUrl,
     downloadUrl: res.data.downloadUrl,
     authorizationToken: res.data.authorizationToken,
-    // Token B2 sống 24h, mình cache 23h cho an toàn (chừa dư 1h)
     expiresAt: Date.now() + 23 * 60 * 60 * 1000
   };
 
   return authCache;
 }
 
-/**
- * Tạo link phát audio tạm thời (signed URL) cho 1 file trong bucket Private.
- * @param {string} fileName - tên file CHÍNH XÁC như đã upload lên B2 (vd: "full0150.mp3")
- * @param {number} validDurationInSeconds - link sống được bao lâu (mặc định 4 tiếng)
- */
 async function getSignedAudioUrl(fileName, validDurationInSeconds = 4 * 60 * 60) {
   if (!fileName) {
     throw new Error("Thiếu fileName khi tạo signed URL cho B2");
@@ -58,4 +51,37 @@ async function getSignedAudioUrl(fileName, validDurationInSeconds = 4 * 60 * 60)
   return `${auth.downloadUrl}/file/${B2_BUCKET_NAME}/${encodeURIComponent(fileName)}?Authorization=${downloadAuthToken}`;
 }
 
-module.exports = { getSignedAudioUrl };
+/**
+ * Upload 1 file audio (buffer trong RAM) lên B2, trả về tên file đã lưu.
+ * @param {Buffer} fileBuffer - nội dung file audio, lấy từ multer (req.file.buffer)
+ * @param {string} fileName - tên file muốn lưu trên B2 (nên đặt duy nhất để tránh ghi đè)
+ */
+async function uploadAudioFile(fileBuffer, fileName) {
+  const auth = await authorize();
+
+  // B2 yêu cầu xin riêng 1 uploadUrl cho mỗi lần upload (khác với apiUrl thường)
+  const uploadUrlRes = await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_get_upload_url`,
+    { bucketId: B2_BUCKET_ID },
+    { headers: { Authorization: auth.authorizationToken } }
+  );
+
+  const { uploadUrl, authorizationToken } = uploadUrlRes.data;
+  const sha1 = crypto.createHash("sha1").update(fileBuffer).digest("hex");
+
+  await axios.post(uploadUrl, fileBuffer, {
+    headers: {
+      Authorization: authorizationToken,
+      "X-Bz-File-Name": encodeURIComponent(fileName),
+      "Content-Type": "b2/x-auto",
+      "Content-Length": fileBuffer.length,
+      "X-Bz-Content-Sha1": sha1
+    },
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity
+  });
+
+  return fileName;
+}
+
+module.exports = { getSignedAudioUrl, uploadAudioFile };

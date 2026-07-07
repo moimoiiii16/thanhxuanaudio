@@ -19,6 +19,7 @@ app.use("/media", express.static(path.join(__dirname, "public/media")));
 
 app.use("/api/playlists", playlistsRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/admin", require("./routes/admin"));
 app.use("/api/unlock", unlockRouter);
 app.use("/api/video", videoRouter);
 
