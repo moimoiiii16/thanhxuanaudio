@@ -22,7 +22,7 @@ const playlists = [
     parts: [
       // Part 1 = miễn phí -> videoUrl khai báo thẳng ở đây, đổi sang file audio thật của bạn
       { id: "tddt-p1", partNumber: 1, title: "Phần 1: Khởi Đầu Nghịch Cảnh", duration: "275:09", videoUrl: `${BACKEND_URL}/media/full0150.mp4`, locked: false },      // Part 2, 3 bị khóa -> videoUrl để null, source thật khai báo ở routes/video.js
-      { id: "tddt-p2", partNumber: 2, title: "Phần 2: Cơ Duyên Bí Ẩn", duration: "20:11", videoUrl: null, locked: true },
+      { id: "tddt-p2", partNumber: 2, title: "Phần 2: Cơ Duyên Bí Ẩn", duration: "20:11", videoUrl: `${BACKEND_URL}/media/full0150.mp4`, locked: true },
       { id: "tddt-p3", partNumber: 3, title: "Phần 3: Đại Chiến Tông Môn", duration: "19:47", videoUrl: null, locked: true },
     ]
   },
