@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Truyện Có Não — Audio Stories Platform</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div class="app-shell">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">🎧</div>
+        <div class="brand-text">
+          <div class="name">Truyện Có Não</div>
+          <div class="sub">Audio Stories</div>
+        </div>
+      </div>
+
+      <div class="search-box">🔍 Tìm truyện...</div>
+
+      <div>
+        <div class="nav-label" style="margin-bottom:10px">Khám phá truyện audio</div>
+        <div id="story-list" class="story-list">
+          <p class="loading-text">Đang tải...</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+
+      <!-- Player hero -->
+      <div id="player-hero" class="player-hero">
+        <p class="loading-text">Đang tải trình phát...</p>
+      </div>
+
+      <!-- Episode list -->
+      <div class="section-heading" id="episodes-heading" style="display:none">Danh sách tập</div>
+      <div id="episode-list" class="episode-list"></div>
+
+      <!-- Unlock CTA (rendered dynamically right after the first locked episode) -->
+      <div id="unlock-cta-slot"></div>
+
+    </main>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
