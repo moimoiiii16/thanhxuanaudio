@@ -2,15 +2,13 @@
 // DỮ LIỆU MẪU - Trong thực tế nên thay bằng MongoDB/PostgreSQL
 //
 // CÁCH THÊM AUDIO CỦA BẠN:
-// 1. Copy file audio (.mp3 khuyến nghị) vào backend/public/media/
-// 2. Sửa "videoUrl" bên dưới trỏ về:
-//      `${BACKEND_URL}/media/ten-file-cua-ban.mp3`
-// 3. Với part bị khóa (locked:true), video KHÔNG lộ ở đây,
-//    phải khai báo thêm trong backend/routes/video.js
-//    (object REAL_VIDEO_SOURCES) - xem hướng dẫn trong file đó.
+// 1. Upload file audio (.mp3) lên bucket Backblaze B2 "truyenconaoaudio"
+//    (qua nút Upload/Download trong B2 Console, hoặc công cụ khác).
+// 2. Điền ĐÚNG tên file (kể cả hoa/thường) vào "audioFile" bên dưới,
+//    vd nếu file upload lên tên "vtkd-p2.mp3" thì audioFile: "vtkd-p2.mp3".
+// 3. KHÔNG cần khai báo gì thêm ở routes/video.js nữa - cả part khóa
+//    và không khóa đều tự động lấy link phát qua Backblaze.
 // ============================================================
-
-const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:4000";
 
 const playlists = [
   {
@@ -20,10 +18,9 @@ const playlists = [
     description: "Một thiếu niên phế vật ngộ ra thần đạo, từng bước nghịch thiên...",
     category: "Thanh Xuân",
     parts: [
-      // Part 1 = miễn phí -> videoUrl khai báo thẳng ở đây, đổi sang file audio thật của bạn
-      { id: "tddt-p1", partNumber: 1, title: "Phần 1: Khởi Đầu Nghịch Cảnh", duration: "275:09", videoUrl: `${BACKEND_URL}/media/full0150.mp4`, locked: false },      // Part 2, 3 bị khóa -> videoUrl để null, source thật khai báo ở routes/video.js
-      { id: "tddt-p2", partNumber: 2, title: "Phần 2: Cơ Duyên Bí Ẩn", duration: "20:11", videoUrl: `${BACKEND_URL}/media/full0150.mp4`, locked: true },
-      { id: "tddt-p3", partNumber: 3, title: "Phần 3: Đại Chiến Tông Môn", duration: "19:47", videoUrl: null, locked: true },
+      { id: "tddt-p1", partNumber: 1, title: "Phần 1: Khởi Đầu Nghịch Cảnh", duration: "275:09", audioFile: "full0150.mp3", locked: false },
+      { id: "tddt-p2", partNumber: 2, title: "Phần 2: Cơ Duyên Bí Ẩn", duration: "20:11", audioFile: "tddt-p2.mp3", locked: true },
+      { id: "tddt-p3", partNumber: 3, title: "Phần 3: Đại Chiến Tông Môn", duration: "19:47", audioFile: "tddt-p3.mp3", locked: true },
     ]
   },
   {
@@ -33,14 +30,14 @@ const playlists = [
     description: "Kiếm khách cô độc mang theo mối thù diệt môn, xuôi ngược giang hồ...",
     category: "Kiếm Hiệp",
     parts: [
-      { id: "vtkd-p1", partNumber: 1, title: "Phần 1: Kiếm Khách Xuất Sơn", duration: "22:05", videoUrl: `${BACKEND_URL}/media/vtkd-p1.mp3`, locked: false },
-      { id: "vtkd-p2", partNumber: 2, title: "Phần 2: Huyết Chiến Ma Giáo", duration: "21:30", videoUrl: null, locked: true }
+      { id: "vtkd-p1", partNumber: 1, title: "Phần 1: Kiếm Khách Xuất Sơn", duration: "22:05", audioFile: "vtkd-p1.mp3", locked: false },
+      { id: "vtkd-p2", partNumber: 2, title: "Phần 2: Huyết Chiến Ma Giáo", duration: "21:30", audioFile: "vtkd-p2.mp3", locked: true }
     ]
   }
 ];
 
 function getAllPlaylists() {
-  // Trang chủ chỉ cần metadata, không trả toàn bộ parts + videoUrl
+  // Trang chủ chỉ cần metadata, không trả toàn bộ parts + audioFile
   return playlists.map(p => ({
     id: p.id,
     title: p.title,
@@ -55,7 +52,10 @@ function getPlaylistById(id) {
   const playlist = playlists.find(p => p.id === id);
   if (!playlist) return null;
 
-  // Ẩn videoUrl thật của các part bị khóa trước khi trả về frontend
+  // Ẩn audioFile thật của các part bị khóa trước khi trả về frontend.
+  // Với part KHÔNG khóa, vẫn giữ lại audioFile ở đây để route phía trên
+  // (routes/playlists.js) dùng nó tạo signed URL - route sẽ tự xóa field
+  // này trước khi trả JSON cuối cùng cho client.
   return {
     ...playlist,
     parts: playlist.parts.map(part => ({
@@ -64,7 +64,7 @@ function getPlaylistById(id) {
       title: part.title,
       duration: part.duration,
       locked: part.locked,
-      videoUrl: part.locked ? null : part.videoUrl
+      audioFile: part.locked ? null : part.audioFile
     }))
   };
 }
