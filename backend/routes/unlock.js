@@ -83,7 +83,8 @@ router.post("/start", async (req, res) => {
     step: 0,
     createdAt: now,
     expiresAt: now + SESSION_TTL_MS,
-    consumed: false
+    consumed: false,
+    finalUrl: null
   });
 
   const callbackUrl = buildCheckpointUrl(sessionId, 1);
@@ -113,6 +114,11 @@ router.get("/checkpoint", async (req, res) => {
     return res.status(400).send(renderErrorPage("Phiên vượt link đã hết hạn, vui lòng bắt đầu lại."));
   }
   if (session.consumed) {
+    // Có thể do dịch vụ rút gọn link gọi trùng (quét trước / bot an toàn).
+    // Nếu chữ ký hợp lệ cho đúng bước cuối, redirect lại URL đã cấp thay vì báo lỗi.
+    if (verifyCheckpointSig(sessionId, stepNum, sig) && stepNum === TOTAL_STEPS && session.finalUrl) {
+      return res.redirect(session.finalUrl);
+    }
     return res.status(400).send(renderErrorPage("Phiên này đã được sử dụng."));
   }
   if (!verifyCheckpointSig(sessionId, stepNum, sig)) {
@@ -142,6 +148,7 @@ router.get("/checkpoint", async (req, res) => {
   session.consumed = true;
   const unlockToken = issueUnlockToken(session.videoId, sessionId);
   const watchUrl = `${FRONTEND_URL}/index.html?video=${session.videoId}&token=${unlockToken}`;
+  session.finalUrl = watchUrl;
   return res.redirect(watchUrl);
 });
 
