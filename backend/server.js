@@ -5,6 +5,7 @@ const path = require("path");
 const mongoose = require("mongoose");
 
 const playlistsRouter = require("./routes/playlists");
+const authRouter = require("./routes/auth");
 const unlockRouter = require("./routes/unlock");
 const videoRouter = require("./routes/video");
 
@@ -17,6 +18,7 @@ app.use(express.json());
 app.use("/media", express.static(path.join(__dirname, "public/media")));
 
 app.use("/api/playlists", playlistsRouter);
+app.use("/api/auth", authRouter);
 app.use("/api/unlock", unlockRouter);
 app.use("/api/video", videoRouter);
 

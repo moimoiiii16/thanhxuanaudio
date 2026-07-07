@@ -10,6 +10,9 @@ const {
   issueUnlockToken
 } = require("../utils/token");
 
+const UnlockedPart = require("../models/UnlockedPart");
+const { optionalAuth } = require("../middleware/auth");
+
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MINUTES || 20) * 60 * 1000;
 const BACKEND_URL = process.env.BACKEND_URL;
 const FRONTEND_URL = process.env.FRONTEND_URL;
@@ -70,7 +73,7 @@ async function buildShortlinkRedirect(step, callbackUrl) {
 // Body: { videoId }
 // Bắt đầu 1 phiên vượt link cho videoId, trả về link rút gọn bước 1
 // ============================================================
-router.post("/start", async (req, res) => {
+router.post("/start", optionalAuth, async (req, res) => {
   const { videoId } = req.body;
   if (!videoId) return res.status(400).json({ error: "Thiếu videoId" });
 
@@ -90,7 +93,8 @@ router.post("/start", async (req, res) => {
     expiresAt: now + SESSION_TTL_MS,
     consumed: false,
     finalUrl: null,
-    stepResults: new Map()
+    stepResults: new Map(),
+    userId: req.user ? req.user.userId : null
   });
 
   const callbackUrl = buildCheckpointUrl(sessionId, 1);
@@ -131,6 +135,23 @@ async function processStep(session, stepNum) {
   const watchUrl = `${FRONTEND_URL}/index.html?video=${session.videoId}&token=${unlockToken}`;
   session.finalUrl = watchUrl;
   session.consumed = true;
+
+  // Nếu user đã đăng nhập lúc bắt đầu vượt link -> lưu vĩnh viễn vào DB,
+  // để lần sau họ không cần vượt link lại tập này nữa.
+  if (session.userId) {
+    try {
+      await UnlockedPart.updateOne(
+        { userId: session.userId, partId: session.videoId },
+        { $setOnInsert: { userId: session.userId, partId: session.videoId } },
+        { upsert: true }
+      );
+      console.log(`[checkpoint] Đã lưu unlock vĩnh viễn userId=${session.userId} partId=${session.videoId}`);
+    } catch (err) {
+      console.error("Lỗi lưu UnlockedPart:", err.message);
+      // Không chặn user xem video dù việc lưu DB bị lỗi, chỉ log lại để theo dõi
+    }
+  }
+
   console.log(`[checkpoint] HOÀN TẤT sessionId=${session.sessionId}, cấp token, watchUrl=${watchUrl} t=${Date.now()}`);
   return { type: "final", url: watchUrl };
 }

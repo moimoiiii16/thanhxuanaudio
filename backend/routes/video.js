@@ -1,21 +1,24 @@
 const express = require("express");
 const router = express.Router();
 
-const { findPartById } = require("../data/playlists");
+const Playlist = require("../models/Playlist");
 const { verifyUnlockToken } = require("../utils/token");
 const { getSignedAudioUrl } = require("../utils/b2");
+const UnlockedPart = require("../models/UnlockedPart");
+const { optionalAuth } = require("../middleware/auth");
 
 // ============================================================
 // GET /api/video/:videoId?token=xxx
 // Trả về video source THẬT (link tạm thời từ Backblaze) nếu:
 //  - Part đó không bị khóa (Part 1), HOẶC
+//  - User đã đăng nhập VÀ đã từng mở khóa tập này trước đây, HOẶC
 //  - Có unlockToken hợp lệ, đúng videoId, chưa hết hạn
 // ============================================================
-router.get("/:videoId", async (req, res) => {
+router.get("/:videoId", optionalAuth, async (req, res) => {
   const { videoId } = req.params;
   const { token } = req.query;
 
-  const found = findPartById(videoId);
+  const found = await Playlist.findPartById(videoId);
   if (!found) return res.status(404).json({ error: "Không tìm thấy tập phim" });
 
   const { part } = found;
@@ -27,7 +30,16 @@ router.get("/:videoId", async (req, res) => {
       return res.json({ videoUrl, locked: false });
     }
 
-    // Part bị khóa -> bắt buộc phải có token hợp lệ
+    // Nếu user đã đăng nhập và đã mở khóa tập này ở lần trước -> cho xem luôn
+    if (req.user) {
+      const existing = await UnlockedPart.findOne({ userId: req.user.userId, partId: videoId });
+      if (existing) {
+        const videoUrl = await getSignedAudioUrl(part.audioFile);
+        return res.json({ videoUrl, locked: false });
+      }
+    }
+
+    // Chưa đăng nhập hoặc chưa từng mở khóa -> bắt buộc phải có token vượt link
     if (!token) {
       return res.status(403).json({ error: "Cần vượt link để mở khóa tập này", locked: true });
     }
@@ -40,7 +52,6 @@ router.get("/:videoId", async (req, res) => {
       return res.status(403).json({ error: "Token không khớp với tập phim này", locked: true });
     }
 
-    // Token hợp lệ -> tạo signed URL thật từ Backblaze
     if (!part.audioFile) {
       return res.status(404).json({ error: "Audio của tập này chưa được cấu hình" });
     }

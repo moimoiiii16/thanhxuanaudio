@@ -7,6 +7,136 @@ let currentPart = null; // part object currently loaded in the player
 let isPlaying = false;
 let searchQuery = ""; // NEW: chuỗi đang tìm kiếm trong ô search
 
+// ============================================================
+// AUTH STATE
+// ============================================================
+function getAuthToken() { return localStorage.getItem("authToken"); }
+function getAuthUsername() { return localStorage.getItem("authUsername"); }
+function getAuthDisplayName() { return localStorage.getItem("authDisplayName"); }
+
+function saveAuthSession(token, username, displayName, role) {
+  localStorage.setItem("authToken", token);
+  localStorage.setItem("authUsername", username);
+  localStorage.setItem("authDisplayName", displayName);
+  localStorage.setItem("authRole", role);
+}
+
+function clearAuthSession() {
+  localStorage.removeItem("authToken");
+  localStorage.removeItem("authUsername");
+  localStorage.removeItem("authDisplayName");
+  localStorage.removeItem("authRole");
+}
+
+function renderAuthBox() {
+  const box = document.getElementById("auth-box");
+  const token = getAuthToken();
+  const displayName = getAuthDisplayName();
+
+  if (token && displayName) {
+    box.innerHTML = `
+      <div class="auth-user-info">
+        <span class="auth-user-name">👤 ${displayName}</span>
+        <button class="auth-logout-btn" onclick="logout()">Đăng xuất</button>
+      </div>
+    `;
+  } else {
+    box.innerHTML = `
+      <button class="auth-guest-btn" onclick="openAuthModal()">Đăng nhập / Đăng ký</button>
+    `;
+  }
+}
+
+function openAuthModal() {
+  document.getElementById("auth-modal").style.display = "flex";
+}
+function closeAuthModal() {
+  document.getElementById("auth-modal").style.display = "none";
+}
+function closeAuthModalOnOverlay(event) {
+  if (event.target.id === "auth-modal") closeAuthModal();
+}
+
+function switchAuthTab(tab) {
+  const isLogin = tab === "login";
+  document.getElementById("tab-login").classList.toggle("active", isLogin);
+  document.getElementById("tab-register").classList.toggle("active", !isLogin);
+  document.getElementById("login-form").style.display = isLogin ? "flex" : "none";
+  document.getElementById("register-form").style.display = isLogin ? "none" : "flex";
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  const username = document.getElementById("login-username").value.trim();
+  const password = document.getElementById("login-password").value;
+  const errorEl = document.getElementById("login-error");
+  errorEl.textContent = "";
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = data.error || "Đăng nhập thất bại";
+      return;
+    }
+    saveAuthSession(data.token, data.username, data.displayName, data.role);
+    closeAuthModal();
+    renderAuthBox();
+  } catch (err) {
+    errorEl.textContent = "Lỗi kết nối máy chủ";
+  }
+}
+
+async function handleRegister(event) {
+  event.preventDefault();
+  const username = document.getElementById("register-username").value.trim();
+  const displayName = document.getElementById("register-displayname").value.trim();
+  const password = document.getElementById("register-password").value;
+  const passwordConfirm = document.getElementById("register-password-confirm").value;
+  const errorEl = document.getElementById("register-error");
+  errorEl.textContent = "";
+
+  if (password !== passwordConfirm) {
+    errorEl.textContent = "Mật khẩu nhập lại không khớp";
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, displayName, password })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = data.error || "Đăng ký thất bại";
+      return;
+    }
+    saveAuthSession(data.token, data.username, data.displayName, data.role);
+    closeAuthModal();
+    renderAuthBox();
+  } catch (err) {
+    errorEl.textContent = "Lỗi kết nối máy chủ";
+  }
+}
+
+function logout() {
+  clearAuthSession();
+  renderAuthBox();
+}
+
+window.openAuthModal = openAuthModal;
+window.closeAuthModal = closeAuthModal;
+window.closeAuthModalOnOverlay = closeAuthModalOnOverlay;
+window.switchAuthTab = switchAuthTab;
+window.handleLogin = handleLogin;
+window.handleRegister = handleRegister;
+window.logout = logout;
+
 const qs = new URLSearchParams(location.search);
 const tokenFromUrl = qs.get("token");
 const videoFromUrl = qs.get("video");
@@ -29,7 +159,8 @@ async function init() {
     const res = await fetch(`${API_BASE_URL}/api/playlists`);
     allPlaylists = await res.json();
     renderSidebar();
-
+    renderAuthBox();
+    
     if (allPlaylists.length === 0) return;
 
     // Nếu vừa quay lại từ unlock flow, videoFromUrl cho biết part nào cần mở
@@ -205,7 +336,11 @@ async function loadPart(part) {
   let videoUrl = null;
   let locked = part.locked;
   try {
-    const res = await fetch(url);
+    const headers = {};
+    const authToken = getAuthToken();
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
+    const res = await fetch(url, { headers });
     const data = await res.json();
     if (res.ok && data.videoUrl) {
       videoUrl = data.videoUrl;
@@ -339,9 +474,13 @@ async function startUnlockFlow(videoId) {
   }
 
   try {
+    const headers = { "Content-Type": "application/json" };
+    const authToken = getAuthToken();
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
     const res = await fetch(`${API_BASE_URL}/api/unlock/start`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ videoId })
     });
     const data = await res.json();
