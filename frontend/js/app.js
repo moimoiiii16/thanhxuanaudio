@@ -780,6 +780,7 @@ async function renderAdminPartsSection(playlistId, forceRefresh = false) {
     <div class="admin-part-add-wrap" style="margin-top:10px">
       <div class="admin-section-title">Thêm tập mới</div>
       <form class="admin-form" onsubmit="handleAdminAddPart(event, '${playlistId}')">
+        <input type="text" id="admin-new-part-id-${playlistId}" placeholder="ID tập (vd: phan-1, không dấu, không cách)" required>
         <input type="number" id="admin-new-part-number-${playlistId}" placeholder="Số thứ tự (vd: 1)" required min="1">
         <input type="text" id="admin-new-part-title-${playlistId}" placeholder="Tiêu đề tập" required>
         <input type="text" id="admin-new-part-duration-${playlistId}" placeholder="Thời lượng (vd: 12:34)" required>
@@ -807,6 +808,7 @@ async function handleAdminAddPart(event, playlistId) {
   }
 
   const formData = new FormData();
+  formData.append("partId", document.getElementById(`admin-new-part-id-${playlistId}`).value.trim());
   formData.append("partNumber", document.getElementById(`admin-new-part-number-${playlistId}`).value);
   formData.append("title", document.getElementById(`admin-new-part-title-${playlistId}`).value.trim());
   formData.append("duration", document.getElementById(`admin-new-part-duration-${playlistId}`).value.trim());
