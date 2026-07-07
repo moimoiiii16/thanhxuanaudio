@@ -26,7 +26,11 @@ const SHORTLINK_API_BASE = process.env.SHORTLINK_API_BASE; // Vd: https://link4m
 // để chạy được nhiều instance server và tự động hết hạn (TTL).
 // ------------------------------------------------------------
 const sessions = new Map();
-// sessions.set(sessionId, { videoId, step, createdAt, expiresAt, consumed })
+// sessions.set(sessionId, {
+//   sessionId, videoId, step, createdAt, expiresAt,
+//   consumed, finalUrl,
+//   stepResults: Map<stepNum, Promise<result>>   // cache/idempotency theo từng bước
+// })
 
 function cleanupExpiredSessions() {
   const now = Date.now();
@@ -49,7 +53,7 @@ async function buildShortlinkRedirect(step, callbackUrl) {
 
   try {
     const res = await axios.get(apiUrl);
-    
+
     if (res.data && res.data.status === "success") {
       return res.data.shortenedUrl;
     } else {
@@ -79,16 +83,18 @@ router.post("/start", async (req, res) => {
   const sessionId = uuidv4();
   const now = Date.now();
   sessions.set(sessionId, {
+    sessionId,
     videoId,
     step: 0,
     createdAt: now,
     expiresAt: now + SESSION_TTL_MS,
     consumed: false,
-    finalUrl: null
+    finalUrl: null,
+    stepResults: new Map()
   });
 
   const callbackUrl = buildCheckpointUrl(sessionId, 1);
-  
+
   try {
     const redirectUrl = await buildShortlinkRedirect(1, callbackUrl);
     res.json({ sessionId, step: 1, totalSteps: TOTAL_STEPS, redirectUrl });
@@ -98,12 +104,57 @@ router.post("/start", async (req, res) => {
 });
 
 // ============================================================
+// Xử lý thật sự cho 1 bước (chỉ được gọi ĐÚNG 1 LẦN cho mỗi bước
+// của mỗi session — nhờ được "claim" atomically trong handler bên dưới).
+// Trả về 1 object mô tả kết quả để render/redirect, và được cache lại
+// dưới dạng Promise trong session.stepResults để mọi request trùng
+// (đến trước, trong, hay sau khi xử lý xong) đều nhận được cùng 1 kết quả.
+// ============================================================
+async function processStep(session, stepNum) {
+  console.log(`[checkpoint] BẮT ĐẦU xử lý sessionId=${session.sessionId} step=${stepNum} t=${Date.now()}`);
+
+  if (stepNum < TOTAL_STEPS) {
+    const nextStep = stepNum + 1;
+    const callbackUrl = buildCheckpointUrl(session.sessionId, nextStep);
+    try {
+      const redirectUrl = await buildShortlinkRedirect(nextStep, callbackUrl);
+      console.log(`[checkpoint] XONG step=${stepNum} -> tạo redirect cho step=${nextStep} t=${Date.now()}`);
+      return { type: "next", completedStep: stepNum, nextStep, redirectUrl };
+    } catch (err) {
+      console.error(`[checkpoint] LỖI khi tạo bước tiếp theo cho sessionId=${session.sessionId}:`, err.message);
+      return { type: "error", message: "Không thể tạo bước tiếp theo, vui lòng tải lại trang." };
+    }
+  }
+
+  // Bước cuối cùng -> cấp unlock token
+  const unlockToken = issueUnlockToken(session.videoId, session.sessionId);
+  const watchUrl = `${FRONTEND_URL}/index.html?video=${session.videoId}&token=${unlockToken}`;
+  session.finalUrl = watchUrl;
+  session.consumed = true;
+  console.log(`[checkpoint] HOÀN TẤT sessionId=${session.sessionId}, cấp token, watchUrl=${watchUrl} t=${Date.now()}`);
+  return { type: "final", url: watchUrl };
+}
+
+function sendStepResult(res, result) {
+  if (result.type === "next") {
+    return res.send(renderNextStepPage(result.completedStep, result.nextStep, result.redirectUrl));
+  }
+  if (result.type === "final") {
+    return res.redirect(result.url);
+  }
+  // type === "error"
+  return res.status(500).send(renderErrorPage(result.message || "Có lỗi xảy ra, vui lòng thử lại."));
+}
+
+// ============================================================
 // GET /api/unlock/checkpoint?sessionId=&step=&sig=
 // Shortlink service redirect user về đây sau khi qua nhiệm vụ.
 // ============================================================
 router.get("/checkpoint", async (req, res) => {
   const { sessionId, step, sig } = req.query;
   const stepNum = Number(step);
+
+  console.log(`[checkpoint] NHẬN request sessionId=${sessionId} step=${stepNum} t=${Date.now()}`);
 
   const session = sessions.get(sessionId);
   if (!session) {
@@ -113,43 +164,45 @@ router.get("/checkpoint", async (req, res) => {
     sessions.delete(sessionId);
     return res.status(400).send(renderErrorPage("Phiên vượt link đã hết hạn, vui lòng bắt đầu lại."));
   }
-  if (session.consumed) {
-    // Có thể do dịch vụ rút gọn link gọi trùng (quét trước / bot an toàn).
-    // Nếu chữ ký hợp lệ cho đúng bước cuối, redirect lại URL đã cấp thay vì báo lỗi.
-    if (verifyCheckpointSig(sessionId, stepNum, sig) && stepNum === TOTAL_STEPS && session.finalUrl) {
-      return res.redirect(session.finalUrl);
-    }
-    return res.status(400).send(renderErrorPage("Phiên này đã được sử dụng."));
-  }
   if (!verifyCheckpointSig(sessionId, stepNum, sig)) {
     return res.status(400).send(renderErrorPage("Chữ ký không hợp lệ. Có dấu hiệu can thiệp URL."));
   }
+
+  // ----------------------------------------------------------
+  // Bước này ĐÃ được claim trước đó (đang xử lý hoặc đã xử lý xong)
+  // -> đây là request trùng (Link4m gọi callback 2 lần, user bấm back, v.v).
+  // KHÔNG báo lỗi, KHÔNG chạy lại logic — chỉ "phát lại" đúng kết quả
+  // của lần xử lý gốc (chờ nó xử lý xong nếu vẫn đang await).
+  // ----------------------------------------------------------
+  if (stepNum <= session.step) {
+    const cached = session.stepResults.get(stepNum);
+    if (cached) {
+      console.log(`[checkpoint] TRÙNG LẶP phát hiện sessionId=${sessionId} step=${stepNum} -> trả lại kết quả cache t=${Date.now()}`);
+      const result = await cached;
+      return sendStepResult(res, result);
+    }
+    // Trường hợp hiếm gặp: step đã qua nhưng không còn cache (server restart mất RAM, v.v.)
+    return res.status(400).send(renderErrorPage("Phiên này đã được sử dụng."));
+  }
+
   // Chống nhảy cóc: step gửi lên phải đúng bằng step tiếp theo cần hoàn thành
   if (stepNum !== session.step + 1) {
     return res.status(400).send(renderErrorPage("Bạn cần hoàn thành các bước theo đúng thứ tự."));
   }
 
-  // Hợp lệ -> cập nhật tiến độ
+  // ----------------------------------------------------------
+  // CLAIM bước này NGAY LẬP TỨC (đồng bộ, trước bất kỳ await nào)
+  // rồi mới bắt đầu xử lý bất đồng bộ. Nhờ vậy, bất kỳ request trùng
+  // nào đến sau dòng này (kể cả đến giữa lúc đang await bên trong
+  // processStep) đều sẽ rơi vào nhánh "stepNum <= session.step" ở trên
+  // và được cấp cùng 1 kết quả, thay vì bị coi là sai thứ tự hoặc lỗi.
+  // ----------------------------------------------------------
   session.step = stepNum;
+  const resultPromise = processStep(session, stepNum);
+  session.stepResults.set(stepNum, resultPromise);
 
-  if (stepNum < TOTAL_STEPS) {
-    const nextStep = stepNum + 1;
-    const callbackUrl = buildCheckpointUrl(sessionId, nextStep);
-    
-    try {
-      const redirectUrl = await buildShortlinkRedirect(nextStep, callbackUrl);
-      return res.send(renderNextStepPage(stepNum, nextStep, redirectUrl));
-    } catch (err) {
-      return res.status(500).send(renderErrorPage("Không thể tạo bước tiếp theo, vui lòng tải lại trang."));
-    }
-  }
-
-  // Hoàn thành đủ TOTAL_STEPS bước -> cấp unlock token và redirect về trang xem video
-  session.consumed = true;
-  const unlockToken = issueUnlockToken(session.videoId, sessionId);
-  const watchUrl = `${FRONTEND_URL}/index.html?video=${session.videoId}&token=${unlockToken}`;
-  session.finalUrl = watchUrl;
-  return res.redirect(watchUrl);
+  const result = await resultPromise;
+  return sendStepResult(res, result);
 });
 
 // ------------------------------------------------------------
