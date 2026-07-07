@@ -13,6 +13,8 @@ let searchQuery = ""; // NEW: chuỗi đang tìm kiếm trong ô search
 function getAuthToken() { return localStorage.getItem("authToken"); }
 function getAuthUsername() { return localStorage.getItem("authUsername"); }
 function getAuthDisplayName() { return localStorage.getItem("authDisplayName"); }
+function getAuthRole() { return localStorage.getItem("authRole"); }
+
 
 function saveAuthSession(token, username, displayName, role) {
   localStorage.setItem("authToken", token);
@@ -44,6 +46,11 @@ function renderAuthBox() {
     box.innerHTML = `
       <button class="auth-guest-btn" onclick="openAuthModal()">Đăng nhập / Đăng ký</button>
     `;
+  }
+
+  const adminBtn = document.getElementById("admin-nav-btn");
+  if (adminBtn) {
+    adminBtn.style.display = (token && getAuthRole() === "admin") ? "block" : "none";
   }
 }
 
@@ -539,5 +546,113 @@ function cycleSpeed() {
 
 window.seekRelative = seekRelative;
 window.cycleSpeed = cycleSpeed;
+
+// ============================================================
+// ADMIN PANEL
+// ============================================================
+function openAdminPanel() {
+  document.getElementById("admin-panel").style.display = "flex";
+  loadAdminPlaylists();
+}
+function closeAdminPanel() {
+  document.getElementById("admin-panel").style.display = "none";
+}
+function closeAdminPanelOnOverlay(event) {
+  if (event.target.id === "admin-panel") closeAdminPanel();
+}
+
+function adminAuthHeaders(extra = {}) {
+  const token = getAuthToken();
+  return { ...extra, "Authorization": `Bearer ${token}` };
+}
+
+async function loadAdminPlaylists() {
+  const listEl = document.getElementById("admin-playlist-list");
+  listEl.innerHTML = `<p class="loading-text">Đang tải...</p>`;
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/playlists`);
+    const playlists = await res.json();
+    renderAdminPlaylists(playlists);
+  } catch (err) {
+    listEl.innerHTML = `<p class="error-text">Không tải được danh sách truyện.</p>`;
+    console.error(err);
+  }
+}
+
+function renderAdminPlaylists(playlists) {
+  const listEl = document.getElementById("admin-playlist-list");
+  if (playlists.length === 0) {
+    listEl.innerHTML = `<p class="loading-text">Chưa có truyện nào.</p>`;
+    return;
+  }
+  listEl.innerHTML = playlists.map(p => `
+    <div class="admin-playlist-card">
+      <div class="admin-playlist-card-header">
+        <img src="${p.cover}" alt="${p.title}">
+        <div class="admin-playlist-card-title">${p.title}</div>
+        <div class="admin-playlist-card-actions">
+          <button class="admin-mini-btn danger" onclick="handleAdminDeletePlaylist('${p.id}')">Xóa</button>
+        </div>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function handleAdminAddPlaylist(event) {
+  event.preventDefault();
+  const errorEl = document.getElementById("admin-add-playlist-error");
+  errorEl.textContent = "";
+
+  const body = {
+    id: document.getElementById("admin-new-id").value.trim(),
+    title: document.getElementById("admin-new-title").value.trim(),
+    cover: document.getElementById("admin-new-cover").value.trim(),
+    category: document.getElementById("admin-new-category").value.trim(),
+    description: document.getElementById("admin-new-description").value.trim()
+  };
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/admin/playlists`, {
+      method: "POST",
+      headers: adminAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = data.error || "Tạo truyện thất bại";
+      return;
+    }
+    document.getElementById("admin-add-playlist-form").reset();
+    loadAdminPlaylists();
+    playlistCache.clear();
+  } catch (err) {
+    errorEl.textContent = "Lỗi kết nối máy chủ";
+  }
+}
+
+async function handleAdminDeletePlaylist(playlistId) {
+  if (!confirm("Xóa truyện này? Không thể hoàn tác.")) return;
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/admin/playlists/${playlistId}`, {
+      method: "DELETE",
+      headers: adminAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Xóa thất bại");
+      return;
+    }
+    loadAdminPlaylists();
+    playlistCache.clear();
+  } catch (err) {
+    alert("Lỗi kết nối máy chủ");
+  }
+}
+
+window.openAdminPanel = openAdminPanel;
+window.closeAdminPanel = closeAdminPanel;
+window.closeAdminPanelOnOverlay = closeAdminPanelOnOverlay;
+window.handleAdminAddPlaylist = handleAdminAddPlaylist;
+window.handleAdminDeletePlaylist = handleAdminDeletePlaylist;
 
 init();
