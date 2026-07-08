@@ -132,7 +132,7 @@ async function processStep(session, stepNum) {
 
   // Bước cuối cùng -> cấp unlock token
   const unlockToken = issueUnlockToken(session.videoId, session.sessionId);
-  const watchUrl = `${FRONTEND_URL}/index.html?video=${session.videoId}&token=${unlockToken}`;
+  const watchUrl = `${FRONTEND_URL}/?video=${session.videoId}&token=${unlockToken}`;
   session.finalUrl = watchUrl;
   session.consumed = true;
 
