@@ -3,7 +3,7 @@ const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const router = express.Router();
 
-const { findPartById } = require("../data/playlists");
+const Playlist = require("../models/Playlist");
 const {
   signCheckpoint,
   verifyCheckpointSig,
@@ -77,7 +77,7 @@ router.post("/start", optionalAuth, async (req, res) => {
   const { videoId } = req.body;
   if (!videoId) return res.status(400).json({ error: "Thiếu videoId" });
 
-  const found = findPartById(videoId);
+  const found = await Playlist.findPartById(videoId);
   if (!found) return res.status(404).json({ error: "Không tìm thấy tập phim" });
   if (!found.part.locked) {
     return res.status(400).json({ error: "Tập này không bị khóa, không cần vượt link" });
